@@ -1,0 +1,334 @@
+
+<h2 class="sr-only">GoJS network graph with Kendo-spec persistent popover annotations, pannable canvas</h2>
+
+<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap;">
+  <span style="font-size:12px;color:var(--color-text-secondary);">Click nodes to toggle popovers · Drag canvas to pan · Scroll to zoom</span>
+  <button id="btn-clear" style="margin-left:auto;font-size:12px;padding:4px 12px;">Clear all</button>
+  <button id="btn-all"   style="font-size:12px;padding:4px 12px;">Show all</button>
+</div>
+
+<div id="graph-wrap" style="position:relative;width:100%;height:520px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;background:var(--color-background-secondary);">
+  <!-- GoJS canvas -->
+  <div id="myDiagramDiv" style="width:100%;height:100%;"></div>
+
+  <!-- SVG layer: dashed connector lines drawn here -->
+  <svg id="conn-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible;"></svg>
+
+  <!-- Popover layer: Kendo e -->
+  <div id="pop-layer" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></div>
+</div>
+
+<style>
+/*
+ * Kendo Popover DOM spec — mirrors the exact class structure Kendo UI emits.
+ * Swap this block out when using real Kendo; the JS logic stays identical.
+ *
+ * Structure:
+ *   .k-popover
+ *     .k-popover-callout        ← the triangle arrow
+ *     .k-popover-inner
+ *       .k-popover-header
+ *         .k-popover-title
+ *       .k-popover-body
+ */
+.k-popover {
+  position: absolute;
+  width: 200px;
+  background: var(--color-background-primary);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 6px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.12);
+  pointer-events: all;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  /* Kendo default — position class added by JS */
+}
+
+/* Kendo adds k-popover-right / k-popover-left etc. We default to right. */
+.k-popover.k-popover-right  { margin-left: 10px; }
+.k-popover.k-popover-left   { margin-right: 10px; }
+.k-popover.k-popover-top    { margin-bottom: 10px; }
+.k-popover.k-popover-bottom { margin-top: 10px; }
+
+/* Callout arrow — Kendo uses a rotated square for the triangle */
+.k-popover-callout {
+  position: absolute;
+  width: 10px; height: 10px;
+  background: var(--color-background-primary);
+  border: 1px solid var(--color-border-secondary);
+  transform: rotate(45deg);
+}
+/* Arrow placement per side */
+.k-popover-right  .k-popover-callout { left: -6px;  top: 50%; margin-top: -5px; border-right:none; border-top:none; }
+.k-popover-left   .k-popover-callout { right: -6px; top: 50%; margin-top: -5px; border-left:none; border-bottom:none; }
+.k-popover-top    .k-popover-callout { bottom: -6px; left: 50%; margin-left: -5px; border-left:none; border-top:none; }
+.k-popover-bottom .k-popover-callout { top: -6px;    left: 50%; margin-left: -5px; border-right:none; border-bottom:none; }
+
+.k-popover-inner  { border-radius: 6px; overflow: hidden; }
+
+.k-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--color-border-tertiary);
+  background: var(--color-background-secondary);
+}
+.k-popover-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  display: flex; align-items: center; gap: 6px;
+}
+/* Close button inside header — Kendo's k-button spec */
+.k-popover-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 2px;
+  color: var(--color-text-tertiary);
+}
+.k-popover-close:hover { color: var(--color-text-primary); }
+
+.k-popover-body { padding: 8px 10px 10px; }
+
+/* Rows inside body */
+.k-pop-row {
+  display: flex; justify-content: space-between;
+  padding: 3px 0;
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+  font-size: 11px;
+}
+.k-pop-row:last-of-type { border-bottom: none; }
+.k-pop-label { color: var(--color-text-secondary); }
+.k-pop-val   { font-weight: 500; color: var(--color-text-primary); }
+.k-pop-note  { font-size: 10px; color: var(--color-text-tertiary); font-style: italic; margin-top: 5px; }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/gojs/release/go.js"></script>
+<script>
+// ─── Sample node + link data ──────────────────────────────────────────────────
+const nodeData = [
+  { key:"API Gateway",  color:"#7F77DD", role:"Entry Point",  team:"Platform", status:"Healthy",  note:"Routes all inbound traffic",  connections:8 },
+  { key:"Auth Service", color:"#7F77DD", role:"Core Service", team:"Platform", status:"Healthy",  note:"JWT + OAuth2 flows",          connections:5 },
+  { key:"User DB",      color:"#1D9E75", role:"Database",     team:"Infra",    status:"Healthy",  note:"PostgreSQL 3-node cluster",   connections:3 },
+  { key:"Cache",        color:"#1D9E75", role:"Cache Layer",  team:"Infra",    status:"Degraded", note:"Redis — high memory usage",   connections:4 },
+  { key:"Orders API",   color:"#7F77DD", role:"Core Service", team:"Commerce", status:"Healthy",  note:"Handles checkout & orders",   connections:6 },
+  { key:"Orders DB",    color:"#1D9E75", role:"Database",     team:"Infra",    status:"Healthy",  note:"MySQL primary+replica",       connections:2 },
+  { key:"Payments",     color:"#D85A30", role:"External",     team:"Finance",  status:"Healthy",  note:"Stripe integration",          connections:3 },
+  { key:"Notification", color:"#378ADD", role:"Microservice", team:"Platform", status:"Healthy",  note:"Email + push via SES/FCM",    connections:3 },
+  { key:"Web App",      color:"#D85A30", role:"Client",       team:"Frontend", status:"Healthy",  note:"React SPA, CDN-hosted",       connections:3 },
+  { key:"Mobile App",   color:"#D85A30", role:"Client",       team:"Frontend", status:"Healthy",  note:"iOS + Android React Native",  connections:3 },
+  { key:"Analytics",    color:"#378ADD", role:"Microservice", team:"Data",     status:"Healthy",  note:"ClickHouse OLAP pipeline",    connections:2 },
+];
+const linkData = [
+  {from:"Web App",     to:"API Gateway"  },
+  {from:"Mobile App",  to:"API Gateway"  },
+  {from:"API Gateway", to:"Auth Service" },
+  {from:"API Gateway", to:"Orders API"   },
+  {from:"API Gateway", to:"Analytics"    },
+  {from:"Auth Service",to:"User DB"      },
+  {from:"Auth Service",to:"Cache"        },
+  {from:"Orders API",  to:"Orders DB"    },
+  {from:"Orders API",  to:"Cache"        },
+  {from:"Orders API",  to:"Payments"     },
+  {from:"Orders API",  to:"Notification" },
+  {from:"Payments",    to:"Notification" },
+];
+const nodeMap = {};
+nodeData.forEach(n => nodeMap[n.key] = n);
+
+// ─── GoJS setup ───────────────────────────────────────────────────────────────
+const $g = go.GraphObject.make;
+
+const diagram = $g(go.Diagram, "myDiagramDiv", {
+  // Scroll wheel zooms; drag on empty space pans
+  "toolManager.mouseWheelBehavior": go.ToolManager.WheelZoom,
+  "panningTool.isEnabled": true,
+  allowHorizontalScroll: true,
+  allowVerticalScroll:   true,
+  hasHorizontalScrollbar: false,
+  hasVerticalScrollbar:   false,
+  layout: $g(go.ForceDirectedLayout, { defaultSpringLength:95, defaultElectricalCharge:140 }),
+  "animationManager.isEnabled": true,
+  "undoManager.isEnabled": true,
+  padding: new go.Margin(40),
+});
+
+// Node: rounded rect with colour dot + label
+diagram.nodeTemplate = $g(go.Node, "Spot",
+  { cursor:"pointer" },
+  new go.Binding("location","loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+  $g(go.Panel, "Auto",
+    $g(go.Shape, "RoundedRectangle",
+      { strokeWidth:1.5, width:118, height:36 },
+      new go.Binding("fill",   "color", c => c+"28"),
+      new go.Binding("stroke", "color"),
+    ),
+    $g(go.Panel, "Horizontal",
+      { margin: new go.Margin(0,8,0,8), defaultAlignment: go.Spot.Center },
+      $g(go.Shape, "Circle", { width:9, height:9, strokeWidth:0 }, new go.Binding("fill","color")),
+      $g(go.TextBlock,
+        { margin: new go.Margin(0,0,0,5), font:"500 11.5px sans-serif", stroke:"#1a1a1a",
+          maxSize: new go.Size(82,NaN), overflow:go.TextBlock.OverflowEllipsis, wrap:go.TextBlock.None },
+        new go.Binding("text","key"),
+      ),
+    ),
+  ),
+);
+
+// Link: subtle arrow edges
+diagram.linkTemplate = $g(go.Link,
+  { routing: go.Link.AvoidsNodes, corner:8 },
+  $g(go.Shape, { stroke:"rgba(120,120,120,0.30)", strokeWidth:1.5 }),
+  $g(go.Shape, { toArrow:"OpenTriangle", stroke:"rgba(120,120,120,0.45)", fill:null, scale:1.1 }),
+);
+
+diagram.model = new go.GraphLinksModel(nodeData, linkData);
+
+// ─── DOM references ───────────────────────────────────────────────────────────
+const wrap       = document.getElementById("graph-wrap");
+const diagramDiv = document.getElementById("myDiagramDiv");
+const popLayer   = document.getElementById("pop-layer");
+const connSVG    = document.getElementById("conn-svg");
+
+// activePopovers[key] = { el: <div.k-popover>, line: <SVGLineElement> }
+const activePopovers = {};
+
+const statusColor = { Healthy:"#1D9E75", Degraded:"#EF9F27", Down:"#E24B4A" };
+
+// ─── Convert GoJS node centre → px offset inside #graph-wrap ─────────────────
+function nodeScreenPos(key) {
+  const node = diagram.findNodeForKey(key);
+  if (!node) return null;
+  const nb = node.actualBounds;
+  // transformDocToView: diagram-document coords → GoJS viewport px
+  const vp = diagram.transformDocToView(new go.Point(nb.centerX, nb.centerY));
+  const dr = diagramDiv.getBoundingClientRect();
+  const wr = wrap.getBoundingClientRect();
+  return { x: dr.left - wr.left + vp.x, y: dr.top - wr.top + vp.y };
+}
+
+// ─── Build Kendo Popover DOM ──────────────────────────────────────────────────
+// Matches exact .k-popover class structure Kendo UI emits.
+function buildKendoPopover(key, d) {
+  const dot = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;
+    background:${statusColor[d.status]||'#888'};margin-right:4px;vertical-align:middle;"></span>`;
+
+  const el = document.createElement("div");
+  // k-popover-right: popover appears to the right of its anchor point
+  el.className = "k-popover k-popover-right";
+  el.innerHTML = `
+    <div class="k-popover-callout"></div>
+    <div class="k-popover-inner">
+      <div class="k-popover-header">
+        <span class="k-popover-title">
+          <span style="display:inline-block;width:9px;height:9px;border-radius:50%;
+            background:${d.color};flex-shrink:0;"></span>
+          ${key}
+        </span>
+        <button class="k-popover-close" title="Close">×</button>
+      </div>
+      <div class="k-popover-body">
+        <div class="k-pop-row"><span class="k-pop-label">Status</span><span class="k-pop-val">${dot}${d.status}</span></div>
+        <div class="k-pop-row"><span class="k-pop-label">Role</span>  <span class="k-pop-val">${d.role}</span></div>
+        <div class="k-pop-row"><span class="k-pop-label">Team</span>  <span class="k-pop-val">${d.team}</span></div>
+        <div class="k-pop-row"><span class="k-pop-label">Links</span> <span class="k-pop-val">${d.connections}</span></div>
+        <div class="k-pop-note">${d.note}</div>
+      </div>
+    </div>
+  `;
+
+  // Close button wired here
+  el.querySelector(".k-popover-close").addEventListener("click", e => {
+    e.stopPropagation();
+    removePopover(key);
+  });
+
+  return el;
+}
+
+// ─── Position popover to the right of the node, vertically centred ───────────
+function positionPopover(el, np) {
+  // Place left edge 18px to the right of the node centre
+  const left = np.x + 18;
+  // Centre vertically on node; clamp within wrap height
+  const top  = Math.max(4, Math.min(wrap.offsetHeight - 160, np.y - 60));
+  el.style.left = left + "px";
+  el.style.top  = top  + "px";
+}
+
+// ─── Update connector line between node centre and popover callout ────────────
+function updateConnectorLine(key) {
+  const ap = activePopovers[key];
+  if (!ap) return;
+  const np = nodeScreenPos(key);
+  if (!np) return;
+
+  // Re-position the popover card to track the node
+  positionPopover(ap.el, np);
+
+  // Line goes from node centre to the left edge of the popover (callout tip)
+  const popLeft = parseFloat(ap.el.style.left);
+  const popTop  = parseFloat(ap.el.style.top) + (ap.el.offsetHeight / 2 || 70);
+  ap.line.setAttribute("x1", np.x);
+  ap.line.setAttribute("y1", np.y);
+  ap.line.setAttribute("x2", popLeft);    // right up to the callout
+  ap.line.setAttribute("y2", popTop);
+}
+
+// ─── Add a popover for a node ─────────────────────────────────────────────────
+function addPopover(key) {
+  if (activePopovers[key]) { removePopover(key); return; } // toggle
+
+  const d  = nodeData.find(n => n.key === key);
+  const np = nodeScreenPos(key);
+  if (!d || !np) return;
+
+  // Build and mount the Kendo popover card
+  const el = buildKendoPopover(key, d);
+  positionPopover(el, np);
+  popLayer.appendChild(el);
+
+  // Build and mount the SVG connector line
+  const line = document.createElementNS("http://www.w3.org/2000/svg","line");
+  line.setAttribute("stroke", d.color);
+  line.setAttribute("stroke-width", "1.5");
+  line.setAttribute("stroke-dasharray", "5,3");
+  line.setAttribute("opacity", "0.5");
+  connSVG.appendChild(line);
+
+  activePopovers[key] = { el, line };
+  updateConnectorLine(key);
+}
+
+// ─── Remove a popover ─────────────────────────────────────────────────────────
+function removePopover(key) {
+  const ap = activePopovers[key];
+  if (!ap) return;
+  popLayer.removeChild(ap.el);
+  connSVG.removeChild(ap.line);
+  delete activePopovers[key];
+}
+
+function updateAll() {
+  Object.keys(activePopovers).forEach(updateConnectorLine);
+}
+
+// ─── GoJS event hooks ─────────────────────────────────────────────────────────
+// Toggle popover on node click
+diagram.addDiagramListener("ObjectSingleClicked", e => {
+  const part = e.subject.part;
+  if (part instanceof go.Node) addPopover(part.data.key);
+});
+
+// Reposition popovers + lines on pan, zoom, or node drag
+diagram.addDiagramListener("ViewportBoundsChanged", updateAll);
+diagram.addDiagramListener("LayoutCompleted",       updateAll);
+diagram.addDiagramListener("SelectionMoved",        updateAll);
+
+// ─── Toolbar ──────────────────────────────────────────────────────────────────
+document.getElementById("btn-clear").addEventListener("click", () =>
+  Object.keys(activePopovers).forEach(removePopover));
+
+document.getElementById("btn-all").addEventListener("click", () =>
+  nodeData.forEach(n => { if (!activePopovers[n.key]) addPopover(n.key); }));
+</script>

@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Annotation Framework — GoJS + Highcharts</title>
+
+<!-- GoJS -->
+<script src="https://cdn.jsdelivr.net/npm/gojs/release/go.js"></script>
+<!-- Highcharts -->
+<script src="https://code.highcharts.com/highcharts.js"></script>
+<script src="https://code.highcharts.com/modules/accessibility.js"></script>
+
+<style>
+  /* ── Reset & layout ─────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #f4f5f7;
+    color: #222;
+    padding: 20px;
+  }
+
+  h1 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle {
+    font-size: 12px; color: #888; margin-bottom: 16px;
+  }
+
+  /* Each chart section */
+  .chart-section {
+    background: #fff;
+    border-radius: 10px;
+    border: 1px solid #e8e8e8;
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .chart-section h2 {
+    font-size: 13px; font-weight: 600;
+    padding: 10px 14px;
+    border-bottom: 1px solid #f0f0f0;
+    background: #fafafa;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .chart-section h2 .badge {
+    font-size: 10px; font-weight: 500; padding: 2px 7px;
+    border-radius: 99px; background: #eef; color: #7F77DD;
+  }
+
+  .toolbar {
+    display: flex; gap: 6px; padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    background: #fafafa;
+    font-size: 11px; color: #888; align-items: center; flex-wrap: wrap;
+  }
+  .toolbar span { flex: 1; }
+  .toolbar button {
+    font-size: 11px; padding: 3px 10px;
+    border: 1px solid #ddd; border-radius: 4px;
+    background: #fff; cursor: pointer; color: #444;
+  }
+  .toolbar button:hover { background: #f0f0f0; }
+
+  /* ── Chart containers: position:relative required for annotation layer ── */
+  #gojs-container {
+    position: relative;
+    width: 100%;
+    height: 420px;
+  }
+  #gojs-div {
+    width: 100%; height: 100%;
+  }
+
+  #hc-container {
+    position: relative;
+    width: 100%;
+    height: 380px;
+  }
+  #hc-div {
+    width: 100%; height: 100%;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex; gap: 12px; padding: 6px 12px 10px;
+    font-size: 11px; color: #888; flex-wrap: wrap;
+  }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .legend-dot  { width:8px; height:8px; border-radius:50%; }
+</style>
+</head>
+<body>
+
+<h1>Annotation Framework</h1>
+<p class="subtitle">
+  Shared <code>AnnotationManager</code> powering both GoJS Network Graph and Highcharts Bar Chart.
+  Click any node or bar to pin a Kendo-spec popover annotation.
+</p>
+
+<!-- ── GoJS Section ───────────────────────────────────────────── -->
+<div class="chart-section">
+  <h2>
+    GoJS Network Graph
+    <span class="badge">GoJS adapter</span>
+  </h2>
+  <div class="toolbar">
+    <span>Click nodes to toggle annotations · Drag canvas to pan · Scroll to zoom</span>
+    <button id="gojs-clear">Clear all</button>
+    <button id="gojs-all">Show all</button>
+  </div>
+  <!--
+    #gojs-container: position:relative — required so AnnotationManager's
+    absolutely-positioned popover layer is scoped here.
+  -->
+  <div id="gojs-container">
+    <div id="gojs-div"></div>
+    <!-- AnnotationManager injects its SVG + popover layer here -->
+  </div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:#7F77DD"></span>Platform</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#1D9E75"></span>Infra</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#D85A30"></span>Client</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#378ADD"></span>Service</div>
+  </div>
+</div>
+
+<!-- ── Highcharts Section ─────────────────────────────────────── -->
+<div class="chart-section">
+  <h2>
+    Highcharts Bar Chart
+    <span class="badge">Highcharts adapter</span>
+  </h2>
+  <div class="toolbar">
+    <span>Click bars to toggle annotations · Scroll inside chart to zoom · Drag to pan</span>
+    <button id="hc-clear">Clear all</button>
+  </div>
+  <!--
+    #hc-container: position:relative — same requirement as GoJS container.
+    Highcharts renders #hc-div; AnnotationManager layers sit above it.
+  -->
+  <div id="hc-container">
+    <div id="hc-div"></div>
+  </div>
+</div>
+
+<!-- ── Load our three modules ─────────────────────────────────── -->
+<script src="annotation-manager.js"></script>
+<script src="gojs-annotation-adapter.js"></script>
+<script src="highcharts-annotation-adapter.js"></script>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// SECTION 1 — GoJS diagram
+// ════════════════════════════════════════════════════════════════
+
+const gojsNodeData = [
+  { key:"API Gateway",  color:"#7F77DD", role:"Entry Point",  team:"Platform", status:"Healthy",  note:"Routes all inbound traffic",  connections:8 },
+  { key:"Auth Service", color:"#7F77DD", role:"Core Service", team:"Platform", status:"Healthy",  note:"JWT + OAuth2 flows",          connections:5 },
+  { key:"User DB",      color:"#1D9E75", role:"Database",     team:"Infra",    status:"Healthy",  note:"PostgreSQL 3-node cluster",   connections:3 },
+  { key:"Cache",        color:"#1D9E75", role:"Cache Layer",  team:"Infra",    status:"Degraded", note:"Redis — high memory usage",   connections:4 },
+  { key:"Orders API",   color:"#7F77DD", role:"Core Service", team:"Commerce", status:"Healthy",  note:"Handles checkout & orders",   connections:6 },
+  { key:"Orders DB",    color:"#1D9E75", role:"Database",     team:"Infra",    status:"Healthy",  note:"MySQL primary+replica",       connections:2 },
+  { key:"Payments",     color:"#D85A30", role:"External",     team:"Finance",  status:"Healthy",  note:"Stripe integration",          connections:3 },
+  { key:"Notification", color:"#378ADD", role:"Microservice", team:"Platform", status:"Healthy",  note:"Email + push via SES/FCM",    connections:3 },
+  { key:"Web App",      color:"#D85A30", role:"Client",       team:"Frontend", status:"Healthy",  note:"React SPA, CDN-hosted",       connections:3 },
+  { key:"Mobile App",   color:"#D85A30", role:"Client",       team:"Frontend", status:"Healthy",  note:"iOS + Android React Native",  connections:3 },
+  { key:"Analytics",    color:"#378ADD", role:"Microservice", team:"Data",     status:"Healthy",  note:"ClickHouse OLAP pipeline",    connections:2 },
+];
+const gojsLinkData = [
+  {from:"Web App",     to:"API Gateway"  },
+  {from:"Mobile App",  to:"API Gateway"  },
+  {from:"API Gateway", to:"Auth Service" },
+  {from:"API Gateway", to:"Orders API"   },
+  {from:"API Gateway", to:"Analytics"    },
+  {from:"Auth Service",to:"User DB"      },
+  {from:"Auth Service",to:"Cache"        },
+  {from:"Orders API",  to:"Orders DB"    },
+  {from:"Orders API",  to:"Cache"        },
+  {from:"Orders API",  to:"Payments"     },
+  {from:"Orders API",  to:"Notification" },
+  {from:"Payments",    to:"Notification" },
+];
+
+const $g = go.GraphObject.make;
+
+const gojsDiagram = $g(go.Diagram, "gojs-div", {
+  "toolManager.mouseWheelBehavior": go.ToolManager.WheelZoom,
+  "panningTool.isEnabled": true,
+  allowHorizontalScroll: true,
+  allowVerticalScroll:   true,
+  hasHorizontalScrollbar: false,
+  hasVerticalScrollbar:   false,
+  layout: $g(go.ForceDirectedLayout, { defaultSpringLength:95, defaultElectricalCharge:140 }),
+  "animationManager.isEnabled": true,
+  "undoManager.isEnabled": true,
+  padding: new go.Margin(40),
+});
+
+gojsDiagram.nodeTemplate = $g(go.Node, "Spot",
+  { cursor:"pointer" },
+  new go.Binding("location","loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+  $g(go.Panel, "Auto",
+    $g(go.Shape, "RoundedRectangle",
+      { strokeWidth:1.5, width:118, height:36 },
+      new go.Binding("fill",   "color", c => c+"28"),
+      new go.Binding("stroke", "color"),
+    ),
+    $g(go.Panel, "Horizontal",
+      { margin: new go.Margin(0,8,0,8), defaultAlignment: go.Spot.Center },
+      $g(go.Shape, "Circle", { width:9, height:9, strokeWidth:0 }, new go.Binding("fill","color")),
+      $g(go.TextBlock,
+        { margin: new go.Margin(0,0,0,5), font:"500 11.5px sans-serif", stroke:"#1a1a1a",
+          maxSize: new go.Size(82,NaN), overflow:go.TextBlock.OverflowEllipsis, wrap:go.TextBlock.None },
+        new go.Binding("text","key"),
+      ),
+    ),
+  ),
+);
+gojsDiagram.linkTemplate = $g(go.Link,
+  { routing: go.Link.AvoidsNodes, corner: 8 },
+  $g(go.Shape, { stroke:"rgba(120,120,120,0.30)", strokeWidth:1.5 }),
+  $g(go.Shape, { toArrow:"OpenTriangle", stroke:"rgba(120,120,120,0.45)", fill:null, scale:1.1 }),
+);
+gojsDiagram.model = new go.GraphLinksModel(gojsNodeData, gojsLinkData);
+
+// ── Wire GoJS to AnnotationManager ──────────────────────────────
+
+// 1. Create manager scoped to GoJS container
+const gojsManager = new AnnotationManager(
+  document.getElementById("gojs-container")
+);
+
+// 2. Create adapter
+const gojsAdapter = new GoJSAnnotationAdapter(
+  gojsDiagram,
+  document.getElementById("gojs-container"),
+  gojsManager
+);
+
+// 3. Custom meta builder for our node schema
+gojsAdapter.setMetaBuilder(data => ({
+  title:  data.key,
+  color:  data.color  || "#888",
+  status: data.status || null,
+  note:   data.note   || null,
+  rows: [
+    { label: "Role",        value: data.role        || "—" },
+    { label: "Team",        value: data.team        || "—" },
+    { label: "Status",      value: data.status      || "—" },
+    { label: "Connections", value: data.connections ?? "—" },
+  ],
+}));
+
+// 4. Attach listeners
+gojsAdapter.attach();
+
+// 5. Toolbar wiring
+document.getElementById("gojs-clear").addEventListener("click", () => gojsManager.clear());
+document.getElementById("gojs-all").addEventListener("click", () => {
+  gojsNodeData.forEach(n => {
+    if (!gojsManager.has(n.key)) {
+      const pos = gojsAdapter._nodeScreenPos(n.key);
+      if (pos) gojsManager.add(n.key, gojsAdapter._metaBuilder(n), pos);
+    }
+  });
+});
+
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 2 — Highcharts Bar Chart
+// ════════════════════════════════════════════════════════════════
+
+// Sample monthly request data per service
+const hcSeriesData = [
+  {
+    name: "API Gateway",
+    color: "#7F77DD",
+    data: [
+      { name:"Jan", y:4200, team:"Platform", note:"Post-holiday spike" },
+      { name:"Feb", y:3800, team:"Platform", note:"Normal load"        },
+      { name:"Mar", y:5100, team:"Platform", note:"Campaign traffic"   },
+      { name:"Apr", y:4700, team:"Platform", note:"Steady growth"      },
+      { name:"May", y:5600, team:"Platform", note:"Record month"       },
+      { name:"Jun", y:5200, team:"Platform", note:"Summer slowdown"    },
+    ]
+  },
+  {
+    name: "Orders API",
+    color: "#1D9E75",
+    data: [
+      { name:"Jan", y:2100 },
+      { name:"Feb", y:2400 },
+      { name:"Mar", y:3200 },
+      { name:"Apr", y:2900 },
+      { name:"May", y:3500 },
+      { name:"Jun", y:3100 },
+    ]
+  },
+  {
+    name: "Auth Service",
+    color: "#378ADD",
+    data: [
+      { name:"Jan", y:1800 },
+      { name:"Feb", y:1600 },
+      { name:"Mar", y:2100 },
+      { name:"Apr", y:1950 },
+      { name:"May", y:2300 },
+      { name:"Jun", y:2150 },
+    ]
+  },
+];
+
+const hcChart = Highcharts.chart("hc-div", {
+  chart: {
+    type: "column",
+    animation: { duration: 300 },
+    // Enable zooming by dragging on the chart
+    zoomType: "x",
+    panning: { enabled: true, type: "x" },
+    panKey: "shift",
+    margin: [40, 20, 60, 60],
+    style: { fontFamily: "'Segoe UI', system-ui, sans-serif" },
+  },
+  title: { text: null },
+  xAxis: {
+    categories: ["Jan","Feb","Mar","Apr","May","Jun"],
+    crosshair: true,
+  },
+  yAxis: {
+    title: { text: "Requests (K)" },
+    gridLineColor: "#f0f0f0",
+  },
+  tooltip: { enabled: false }, // we use annotations instead
+  legend: {
+    align: "right", verticalAlign: "top",
+    itemStyle: { fontSize:"11px", fontWeight:"500" },
+  },
+  plotOptions: {
+    column: {
+      borderRadius: 3,
+      groupPadding: 0.1,
+      cursor: "pointer",
+    },
+  },
+  series: hcSeriesData,
+  credits: { enabled: false },
+});
+
+// ── Wire Highcharts to AnnotationManager ────────────────────────
+
+// 1. Create manager scoped to Highcharts container
+const hcManager = new AnnotationManager(
+  document.getElementById("hc-container")
+);
+
+// 2. Create adapter
+const hcAdapter = new HighchartsAnnotationAdapter(
+  hcChart,
+  document.getElementById("hc-container"),
+  hcManager
+);
+
+// 3. Custom meta builder for our bar chart schema
+hcAdapter.setMetaBuilder(point => ({
+  title:  `${point.series.name} — ${point.name || point.category}`,
+  color:  point.series.userOptions.color || point.color || "#378ADD",
+  status: null,
+  note:   point.note || null,
+  rows: [
+    { label: "Series",  value: point.series.name       },
+    { label: "Month",   value: point.name || point.category },
+    { label: "Requests",value: (point.y / 1000).toFixed(1) + "K" },
+    { label: "Team",    value: point.team || "Platform" },
+  ],
+}));
+
+// 4. Attach listeners
+hcAdapter.attach();
+
+// 5. Toolbar
+document.getElementById("hc-clear").addEventListener("click", () => hcManager.clear());
+</script>
+</body>
+</html>

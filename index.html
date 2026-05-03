@@ -91,22 +91,18 @@
 <body>
 
 <h1>Annotation Framework</h1>
-<p class="subtitle">
-  Shared <code>AnnotationManager</code> powering both GoJS Network Graph and Highcharts Bar Chart.
-  Click any node or bar to pin a Kendo-spec popover annotation.
-</p>
 
 <!-- ── GoJS Section ───────────────────────────────────────────── -->
 <div class="chart-section">
   <h2>
     GoJS Network Graph
-    <span class="badge">GoJS adapter</span>
+    <!-- <span class="badge">GoJS adapter</span> -->
   </h2>
-  <div class="toolbar">
+  <!-- <div class="toolbar">
     <span>Click nodes to toggle annotations · Drag canvas to pan · Scroll to zoom</span>
     <button id="gojs-clear">Clear all</button>
     <button id="gojs-all">Show all</button>
-  </div>
+  </div> -->
   <!--
     #gojs-container: position:relative — required so AnnotationManager's
     absolutely-positioned popover layer is scoped here.
@@ -115,24 +111,24 @@
     <div id="gojs-div"></div>
     <!-- AnnotationManager injects its SVG + popover layer here -->
   </div>
-  <div class="legend">
+  <!-- <div class="legend">
     <div class="legend-item"><span class="legend-dot" style="background:#7F77DD"></span>Platform</div>
     <div class="legend-item"><span class="legend-dot" style="background:#1D9E75"></span>Infra</div>
     <div class="legend-item"><span class="legend-dot" style="background:#D85A30"></span>Client</div>
     <div class="legend-item"><span class="legend-dot" style="background:#378ADD"></span>Service</div>
-  </div>
+  </div> -->
 </div>
 
 <!-- ── Highcharts Section ─────────────────────────────────────── -->
 <div class="chart-section">
   <h2>
-    Highcharts Bar Chart
-    <span class="badge">Highcharts adapter</span>
+    Highchart.js Bar Chart
+    <!-- <span class="badge">Highcharts adapter</span> -->
   </h2>
-  <div class="toolbar">
+  <!-- <div class="toolbar">
     <span>Click bars to toggle annotations · Scroll inside chart to zoom · Drag to pan</span>
     <button id="hc-clear">Clear all</button>
-  </div>
+  </div> -->
   <!--
     #hc-container: position:relative — same requirement as GoJS container.
     Highcharts renders #hc-div; AnnotationManager layers sit above it.
@@ -187,7 +183,7 @@ const gojsDiagram = $g(go.Diagram, "gojs-div", {
   "panningTool.isEnabled": true,
   allowHorizontalScroll: true,
   allowVerticalScroll:   true,
-  hasHorizontalScrollbar: false,
+  hasHorizontalScrollbar: true,
   hasVerticalScrollbar:   false,
   layout: $g(go.ForceDirectedLayout, { defaultSpringLength:95, defaultElectricalCharge:140 }),
   "animationManager.isEnabled": true,
@@ -199,14 +195,13 @@ gojsDiagram.nodeTemplate = $g(go.Node, "Spot",
   { cursor:"pointer" },
   new go.Binding("location","loc", go.Point.parse).makeTwoWay(go.Point.stringify),
   $g(go.Panel, "Auto",
-    $g(go.Shape, "RoundedRectangle",
+    $g(go.Shape, "circle",
       { strokeWidth:1.5, width:118, height:36 },
       new go.Binding("fill",   "color", c => c+"28"),
       new go.Binding("stroke", "color"),
     ),
     $g(go.Panel, "Horizontal",
       { margin: new go.Margin(0,8,0,8), defaultAlignment: go.Spot.Center },
-      $g(go.Shape, "Circle", { width:9, height:9, strokeWidth:0 }, new go.Binding("fill","color")),
       $g(go.TextBlock,
         { margin: new go.Margin(0,0,0,5), font:"500 11.5px sans-serif", stroke:"#1a1a1a",
           maxSize: new go.Size(82,NaN), overflow:go.TextBlock.OverflowEllipsis, wrap:go.TextBlock.None },
@@ -253,16 +248,16 @@ gojsAdapter.setMetaBuilder(data => ({
 // 4. Attach listeners
 gojsAdapter.attach();
 
-// 5. Toolbar wiring
-document.getElementById("gojs-clear").addEventListener("click", () => gojsManager.clear());
-document.getElementById("gojs-all").addEventListener("click", () => {
-  gojsNodeData.forEach(n => {
-    if (!gojsManager.has(n.key)) {
-      const pos = gojsAdapter._nodeScreenPos(n.key);
-      if (pos) gojsManager.add(n.key, gojsAdapter._metaBuilder(n), pos);
-    }
-  });
-});
+// // 5. Toolbar wiring
+// document.getElementById("gojs-clear").addEventListener("click", () => gojsManager.clear());
+// document.getElementById("gojs-all").addEventListener("click", () => {
+//   gojsNodeData.forEach(n => {
+//     if (!gojsManager.has(n.key)) {
+//       const pos = gojsAdapter._nodeScreenPos(n.key);
+//       if (pos) gojsManager.add(n.key, gojsAdapter._metaBuilder(n), pos);
+//     }
+//   });
+// });
 
 
 // ════════════════════════════════════════════════════════════════
@@ -331,8 +326,7 @@ const hcChart = Highcharts.chart("hc-div", {
   },
   tooltip: { enabled: false }, // we use annotations instead
   legend: {
-    align: "right", verticalAlign: "top",
-    itemStyle: { fontSize:"11px", fontWeight:"500" },
+    enabled:false,
   },
   plotOptions: {
     column: {
@@ -377,7 +371,7 @@ hcAdapter.setMetaBuilder(point => ({
 hcAdapter.attach();
 
 // 5. Toolbar
-document.getElementById("hc-clear").addEventListener("click", () => hcManager.clear());
+// document.getElementById("hc-clear").addEventListener("click", () => hcManager.clear());
 </script>
 </body>
 </html>

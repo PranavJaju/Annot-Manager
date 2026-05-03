@@ -152,15 +152,9 @@ class AnnotationManager {
       : "";
 
     // Build body rows from meta.rows array
-    const rowsHTML = (meta.rows || []).map(r =>
-      `<div class="k-pop-row">
-        <span class="k-pop-label">${r.label}</span>
-        <span class="k-pop-val">${r.value}</span>
-      </div>`
-    ).join("");
+    
 
-    const noteHTML = meta.note
-      ? `<div class="k-pop-note">${meta.note}</div>` : "";
+    
 
     const el = document.createElement("div");
     el.className = "k-popover k-popover-right";
@@ -176,8 +170,7 @@ class AnnotationManager {
           <button class="k-popover-close" data-key="${key}" title="Close">×</button>
         </div>
         <div class="k-popover-body">
-          ${rowsHTML}
-          ${noteHTML}
+          Hi This is a sample Annotation.
         </div>
       </div>`;
 

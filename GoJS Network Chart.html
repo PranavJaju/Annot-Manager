@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GoJS Network Chart</title>
+<style>
+:root{--bg:#f8fafc;--fg:#0f172a;--muted:#64748b;--node:#ffffff;--edge:#64748b;--accent:#2563eb;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f172a;--fg:#e2e8f0;--muted:#94a3b8;--node:#1e293b;--edge:#94a3b8;--accent:#60a5fa}}
+:root[data-theme="dark"]{--bg:#0f172a;--fg:#e2e8f0;--muted:#94a3b8;--node:#1e293b;--edge:#94a3b8;--accent:#60a5fa}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{padding:12px 16px;font-size:14px;line-height:1.5}
+header b{font-size:16px}
+header span{color:var(--muted)}
+#diagram{flex:1;min-height:300px;border-top:1px solid var(--muted)}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gojs/2.3.17/go.js"></script>
+</head>
+<body>
+<header>
+  <b>GoJS network chart</b><br>
+  <span>Left click: toggle direct children &nbsp;·&nbsp; Right click: toggle whole subtree recursively &nbsp;·&nbsp; grey node = collapsed</span>
+</header>
+<div id="diagram"></div>
+<script>
+const $ = go.GraphObject.make;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+const diagram = $(go.Diagram, "diagram", {
+  initialContentAlignment: go.Spot.Center,
+  "animationManager.isEnabled": true,
+  layout: $(go.ForceDirectedLayout, {
+    maxIterations: 300, defaultSpringLength: 150,
+    defaultElectricalCharge: 220, randomNumberGenerator: null
+  })
+});
+// stop the browser menu on right click so it can be used for recursive toggle
+diagram.div.addEventListener("contextmenu", e => e.preventDefault());
+
+/* ---------- visibility (cycle-safe, replaces tree expand/collapse) ---------- */
+function applyVisibility() {
+  const seen = new Set(), queue = [];
+  diagram.nodes.each(n => { if (n.data.root) { seen.add(n); queue.push(n); } });
+  while (queue.length) {
+    const n = queue.shift();
+    if (n.data.collapsed) continue;               // hide everything reachable only through it
+    n.findNodesOutOf().each(c => {
+      if (!seen.has(c)) { seen.add(c); queue.push(c); }
+    });
+  }
+  diagram.nodes.each(n => n.visible = seen.has(n));
+}
+
+function descendants(node) {                        // all nodes reachable from node (ignores collapsed state)
+  const seen = new Set([node]), queue = [node];
+  while (queue.length) {
+    queue.shift().findNodesOutOf().each(c => {
+      if (!seen.has(c)) { seen.add(c); queue.push(c); }
+    });
+  }
+  return [...seen];
+}
+
+function onLeftClick(e, obj) {                      // toggle direct children
+  const node = obj.part;
+  if (!node.data.hasKids) return;
+  diagram.commit(d => {
+    const expanding = node.data.collapsed;
+    d.model.set(node.data, "collapsed", !expanding);
+    if (expanding) {
+      // newly revealed children start collapsed; already visible ones keep their state
+      node.findNodesOutOf().each(c => {
+        if (c !== node && !c.visible && c.data.hasKids) d.model.set(c.data, "collapsed", true);
+      });
+    }
+    applyVisibility();
+  }, "toggle");
+}
+
+function onRightClick(e, obj) {                     // toggle recursively
+  const node = obj.part;
+  if (!node.data.hasKids) return;
+  const collapse = !node.data.collapsed;            // toggle based on current state
+  diagram.commit(d => {
+    descendants(node).forEach(n => {
+      if (n.data.hasKids) d.model.set(n.data, "collapsed", collapse);
+    });
+    applyVisibility();
+  }, "toggle recursive");
+}
+
+/* ---------- parallel links + loops ---------- */
+function spreadLinks() {
+  const groups = new Map();
+  diagram.links.each(l => {
+    if (!l.fromNode || !l.toNode) return;
+    const a = String(l.fromNode.key), b = String(l.toNode.key);
+    const k = a < b ? a + "|" + b : b + "|" + a;   // same key for A→B and B→A
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(l);
+  });
+  groups.forEach(ls => {
+    ls.forEach((l, i) => {
+      if (l.fromNode === l.toNode) {                // self loop: bigger loop for each extra one
+        l.curviness = 30 * (i + 1);
+      } else {
+        const canonical = String(l.fromNode.key) <= String(l.toNode.key) ? 1 : -1;
+        l.curviness = (i - (ls.length - 1) / 2) * 50 * canonical;
+      }
+    });
+  });
+}
+diagram.addDiagramListener("LayoutCompleted", spreadLinks);
+
+/* ---------- templates ---------- */
+// plain circle nodes; no click handlers on the template
+diagram.nodeTemplate = $(go.Node, "Auto",
+  { cursor: "pointer", locationSpot: go.Spot.Center },
+  $(go.Shape, "Circle",
+    { width: 44, height: 44, strokeWidth: 1.5, stroke: "#64748b" },
+    // collapsed nodes with hidden children are filled grey, everything else is white
+    new go.Binding("fill", "collapsed", c => c ? "#cbd5e1" : "#ffffff")),
+  $(go.TextBlock, { font: "12px system-ui, sans-serif", stroke: "#0f172a", margin: 2 },
+    new go.Binding("text", "key"))
+);
+
+// listen for node clicks on the diagram instead
+diagram.addDiagramListener("ObjectSingleClicked", e => {
+  const part = e.subject.part;
+  if (part instanceof go.Node) onLeftClick(e, part);
+});
+diagram.addDiagramListener("ObjectContextClicked", e => {
+  const part = e.subject.part;
+  if (part instanceof go.Node) onRightClick(e, part);
+});
+
+diagram.linkTemplate = $(go.Link,
+  { curve: go.Link.Bezier, fromEndSegmentLength: 40, toEndSegmentLength: 40, layerName: "Background" },
+  $(go.Shape, { strokeWidth: 1.6, stroke: "#64748b" }),
+  $(go.Shape, { toArrow: "Standard", fill: "#64748b", stroke: null }),
+  $(go.TextBlock, { font: "11px system-ui, sans-serif", stroke: "#475569", background: "rgba(255,255,255,0.85)", margin: 1 },
+    new go.Binding("text", "rel"))
+);
+
+/* ---------- sample data ---------- */
+const colors = { Root: "#2563eb", A: "#059669", B: "#d97706", C: "#7c3aed", D: "#dc2626", E: "#0891b2", F: "#be185d" };
+const links = [
+  { from: "Root", to: "A", rel: "owns" },
+  { from: "Root", to: "B", rel: "owns" },
+  { from: "Root", to: "C", rel: "owns" },
+  // parallel relations between A and B (same direction + reverse)
+  { from: "A", to: "B", rel: "supplies" },
+  { from: "A", to: "B", rel: "audits" },
+  { from: "A", to: "B", rel: "funds" },
+  { from: "B", to: "A", rel: "pays" },
+  // loop between two nodes
+  { from: "A", to: "D", rel: "manages" },
+  { from: "D", to: "E", rel: "calls" },
+  { from: "E", to: "D", rel: "calls back" },
+  // self loops
+  { from: "C", to: "C", rel: "refers to self" },
+  { from: "B", to: "F", rel: "feeds" },
+  { from: "F", to: "F", rel: "recurses" }
+];
+const nodes = Object.keys(colors).map(k => ({
+  key: k, color: colors[k], root: k === "Root", collapsed: k !== "Root",
+  hasKids: links.some(l => l.from === k && l.to !== k)
+}));
+
+diagram.model = new go.GraphLinksModel(nodes, links);
+diagram.commit(applyVisibility, "init");
+</script>
+</body>
+</html>
